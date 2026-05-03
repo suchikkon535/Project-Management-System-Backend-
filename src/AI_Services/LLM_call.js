@@ -9,7 +9,7 @@ const { createTaskService, infoTaskService } = require("./tools/Task_Tools/index
 const { OpenAI } = require("openai");
 
 
-const OPENAI_API_KEY = "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";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const client = new OpenAI({
     apiKey: OPENAI_API_KEY,

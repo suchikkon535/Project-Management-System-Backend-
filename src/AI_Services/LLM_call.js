@@ -4,7 +4,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const axios = require("axios");
 const { buildIntentPrompt, buildEntityPrompt } = require("./prompts/index");
 const { extractJSON } = require("../utils/extractJSON");
-const { createProjectService, infoProjectService } = require("./tools/Project_Tools/index");
+const { createProjectService, infoProjectService, allinfoProjectService } = require("./tools/Project_Tools/index");
 const { createTaskService, infoTaskService } = require("./tools/Task_Tools/index");
 const { OpenAI } = require("openai");
 const { json } = require("express");
@@ -100,26 +100,48 @@ async function handleAction(action, userId, steps) {
         throw new ApiError(400, "Missing action or steps");
     }
 
-    const prompt = buildEntityPrompt(action, steps);
-    const raw = await OpenRouter(prompt);
+    let raw;
+
+    if (
+        action === "create_task" ||
+        action === "create_project" ||
+        action === "info_task" ||
+        action === "project_info"
+    ) {
+        const prompt = buildEntityPrompt(action, steps);
+        raw = await OpenRouter(prompt);
+    }
+
+    let parsed;
+    if (raw) {
+        try {
+            parsed = JSON.parse(raw);
+        } catch (err) {
+            throw new ApiError(500, "Invalid JSON from model");
+        }
+    }
 
     let result;
 
     switch (action) {
         case "create_project":
-            result = await createProjectService(userId, JSON.parse(raw));
+            result = await createProjectService(userId, parsed);
             break;
 
         case "project_info":
-            result = await infoProjectService(userId, JSON.parse(raw));
+            result = await infoProjectService(userId, parsed);
             break;
 
         case "create_task":
-            result = await createTaskService(userId, JSON.parse(raw));
+            result = await createTaskService(userId, parsed);
             break;
 
         case "info_task":
-            result = await infoTaskService(userId, JSON.parse(raw));
+            result = await infoTaskService(userId, parsed);
+            break;
+
+        case "all_projects_info":
+            result = await allinfoProjectService(userId);
             break;
 
         default:
@@ -127,164 +149,107 @@ async function handleAction(action, userId, steps) {
     }
 
     return result;
-};
-
-async function executePlan(plan, userId, sendUpdate) {
-  const results = [];
-
-  for (let i = 0; i < plan.length; i++) {
-    const { action, steps } = plan[i];
-
-    try {
-      sendUpdate({
-        type: "progress",
-        step: i + 1,
-        total: plan.length,
-        action,
-        status: "started"
-      });
-
-      const result = await handleAction(action, userId, steps);
-
-      results.push({ action, success: true, result });
-
-      // ✅ Send result immediately after each action completes
-      sendUpdate({
-        type: "step_result",        // changed type to be more specific
-        step: i + 1,
-        total: plan.length,
-        action,
-        status: "completed",
-        result,
-        isLast: i === plan.length - 1   // let frontend know if its the last one
-      });
-
-    } catch (err) {
-      const errorData = { action, success: false, error: err.message };
-      results.push(errorData);
-
-      sendUpdate({
-        type: "step_result",
-        step: i + 1,
-        total: plan.length,
-        action,
-        status: "failed",
-        error: err.message
-      });
-
-      break;
-    }
-  }
-
-  return results;
 }
 
-// exports.LLM_Preview = asyncHandler(async (req, res) => {
-//   const { message } = req.body;
+async function executePlan(plan, userId, sendUpdate) {
+    const results = [];
 
-//   if (!message) {
-//     throw new ApiError(400, "Message is required");
-//   }
+    for (let i = 0; i < plan.length; i++) {
+        const { action, steps } = plan[i];
 
-//   res.setHeader("Content-Type", "text/event-stream");
-//   res.setHeader("Cache-Control", "no-cache");
-//   res.setHeader("Connection", "keep-alive");
+        try {
+            sendUpdate({
+                type: "progress",
+                step: i + 1,
+                total: plan.length,
+                action,
+                status: "started"
+            });
 
-//   const sendUpdate = (data) => {
-//     res.write(`data: ${JSON.stringify(data)}\n\n`);
-//   };
+            const result = await handleAction(action, userId, steps);
 
-//   try {
-//     sendUpdate({ type: "status", message: "Planning..." });
+            results.push({ action, success: true, result });
 
-//     const prompt = buildIntentPrompt(message);
-//     const raw = await OpenRouter(prompt);
-//     const intent = extractJSON(raw);
+            // ✅ Send result immediately after each action completes
+            sendUpdate({
+                type: "step_result",        // changed type to be more specific
+                step: i + 1,
+                total: plan.length,
+                action,
+                status: "completed",
+                result,
+                isLast: i === plan.length - 1   // let frontend know if its the last one
+            });
 
-//     if (!intent || !intent.plan) {
-//       throw new Error("Invalid plan");
-//     }
+        } catch (err) {
+            const errorData = { action, success: false, error: err.message };
+            results.push(errorData);
 
-//     sendUpdate({
-//       type: "plan",
-//       plan: intent.plan,
-//       total: intent.plan.length    // ✅ send total so frontend can show "1 of 5"
-//     });
+            sendUpdate({
+                type: "step_result",
+                step: i + 1,
+                total: plan.length,
+                action,
+                status: "failed",
+                error: err.message
+            });
 
-//     const userId = req.user._id;
-
-//     const results = await executePlan(intent.plan, userId, sendUpdate);
-
-//     // ✅ Final summary after all steps
-//     sendUpdate({
-//       type: "done",
-//       results,
-//       summary: {
-//         total: results.length,
-//         succeeded: results.filter(r => r.success).length,
-//         failed: results.filter(r => !r.success).length
-//       }
-//     });
-
-//     res.end();
-
-//   } catch (err) {
-//     sendUpdate({
-//       type: "error",
-//       message: err.message
-//     });
-//     res.end();
-//   }
-// });
-
-exports.LLM_Preview = asyncHandler(async (req, res) => {
-  const { message } = req.body;
-
-  if (!message) {
-    throw new ApiError(400, "Message is required");
-  }
-
-  // SSE headers
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-
-  const sendUpdate = (data) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
-  try {
-    sendUpdate({ type: "status", message: "Planning..." });
-
-    const prompt = buildIntentPrompt(message);
-    const raw = await OpenRouter(prompt);
-    const intent = JSON.parse(raw);
-
-    if (!intent || !intent.plan) {
-      throw new Error("Invalid plan");
+            break;
+        }
     }
 
-    sendUpdate({
-      type: "plan",
-      plan: intent.plan
-    });
+    return results;
+}
 
-    const userId = req.user._id;
+exports.LLM_Preview = asyncHandler(async (req, res) => {
+    const { message } = req.body;
 
-    const results = await executePlan(intent.plan, userId, sendUpdate);
+    if (!message) {
+        throw new ApiError(400, "Message is required");
+    }
 
-    sendUpdate({
-      type: "done",
-      results
-    });
+    // SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
-    res.end();
+    const sendUpdate = (data) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
 
-  } catch (err) {
-    sendUpdate({
-      type: "error",
-      message: err.message
-    });
-    res.end();
-  }
+    try {
+        sendUpdate({ type: "status", message: "Planning..." });
+
+        const prompt = buildIntentPrompt(message);
+        const raw = await OpenRouter(prompt);
+        const intent = JSON.parse(raw);
+
+        if (!intent || !intent.plan) {
+            throw new Error("Invalid plan");
+        }
+
+        sendUpdate({
+            type: "plan",
+            plan: intent.plan
+        });
+
+        const userId = req.user._id;
+
+        const results = await executePlan(intent.plan, userId, sendUpdate);
+
+        sendUpdate({
+            type: "done",
+            results
+        });
+
+        res.end();
+
+    } catch (err) {
+        sendUpdate({
+            type: "error",
+            message: err.message
+        });
+        res.end();
+    }
 });
+

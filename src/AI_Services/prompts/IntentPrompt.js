@@ -8,7 +8,7 @@ Context:
 currentDate="${currentDate}"
 
 Available Actions:
-TASK: create_task, update_task, delete_task, info_task  
+TASK: create_task, update_task, delete_task, info_task, all_projects_info
 PROJECT: create_project, update_project, delete_project, project_info  
 
 Instructions:

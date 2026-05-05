@@ -46,7 +46,7 @@ exports.createTaskService = async (userId, data) => {
         ],
     );
      
-    return;
+    return task;
 };
 
 // {

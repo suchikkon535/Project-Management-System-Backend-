@@ -11,6 +11,6 @@ router.post("/logout", UserCtrl.logoutUser);
 router.post("/refresh-token", UserCtrl.refreshToken);
 
 router.post("/ai/task/preview", auth, LLM_Call.LLM_Preview);
-router.post("/ai/task/execute", auth, LLM_Call.LLM_Execute);
+// router.post("/ai/task/execute", auth, LLM_Call.LLM_Execute);
 
 module.exports = router;
